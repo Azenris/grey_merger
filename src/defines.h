@@ -9,7 +9,7 @@
 
 #define array_length( arr ) 	( sizeof( arr ) / sizeof( arr[ 0 ] ) )
 
-#define MEMORY_ALIGNMENT		sizeof( u64 )		// must be a pwoer of 2
+#define MEMORY_ALIGNMENT		sizeof( u64 )
 
 #define INVALID_INDEX_UINT_16 	( UINT16_MAX )
 #define INVALID_INDEX_UINT_32 	( UINT32_MAX )
