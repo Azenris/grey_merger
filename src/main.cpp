@@ -61,7 +61,7 @@ static int usage_message( RESULT_CODE code )
 	show_log_message( "[-channel-g] <file>          EG. -channel-g assets\\image\\image_g.png        (input file for green channel)" );
 	show_log_message( "[-channel-b] <file>          EG. -channel-b assets\\image\\image_b.png        (input file for blue channel)" );
 	show_log_message( "[-o] <file>                  EG. -o assets\\image\\mergedimg.png                  (override the default output file)" );
-	show_log_message( "[-memory] <bytes>            EG. -memory 1024                                   (enable zlib compressing)" );
+	show_log_message( "[-memory] <bytes>            EG. -memory 1024                                   (specify memory allocation))" );
 
 #ifdef DEBUG
 	system( "pause" );
