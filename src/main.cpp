@@ -111,7 +111,7 @@ int main( int _argc, const char *_argv[] )
 		"-channel-g", "debug\\test\\image_1.png",
 		"-channel-b", "debug\\test\\image_2.png",
 		"-v", "-ra"
-		, "-wd", "C:\\ProgrammingCDrive\\GreyMerger"
+		, "-wd", "C:\\ProgrammingCDrive\\grey_merger"
 		, "-o", "debug\\test\\output.png" };
 	int argc = array_length( argv );
 #else
@@ -351,7 +351,7 @@ int main( int argc, const char *argv[] )
 	if ( options.verbose )
 		show_log_message( "Finished creating image. Preparing to save to disk." );
 
-	// TODO : platform_create_directory(  );
+	platform_create_directory( options.outputFile );
 
 	if ( !stbi_write_png( options.outputFile, outWidth, outHeight, outChannels, outImage, outWidth * outChannels ) )
 	{

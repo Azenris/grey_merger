@@ -151,6 +151,62 @@ inline void platform_memset( void *dst, u8 value, u64 bytes )
 }
 
 // Directory
+bool platform_create_directory( const char *directory )
+{
+	char pathMem[ 4096 ];
+	if ( string_utf8_copy( pathMem, directory ) == 0 )
+		return false;
+
+	char *path = pathMem;
+	const char *token;
+	const char *delimiters = "./\\";
+	char delim;
+	char dir[ 4096 ] = "\0";
+
+	if ( *path == '.' )
+	{
+		++path;
+
+		if ( *path == '/' || *path == '\\' )
+		{
+			// ./ (current directory)
+			string_utf8_append( dir, "./" );
+		}
+		else if ( *path == '.' )
+		{
+			++path;
+
+			// ../ (moving up from current directory)
+			if ( *path == '/' || *path == '\\' )
+			{
+				// ./ (current directory)
+				string_utf8_append( dir, "../" );
+			}
+		}
+	}
+
+	path = string_utf8_tokenise( path, delimiters, &token, &delim );
+
+	while ( token )
+	{
+		if ( delim == '.' )
+		{
+			// file ext
+			return true;
+		}
+
+		string_utf8_append( dir, token );
+		string_utf8_append( dir, "/" );
+
+		if ( !CreateDirectory( dir, nullptr ) )
+			return false;
+
+		path = string_utf8_tokenise( path, delimiters, &token, &delim );
+	}
+
+	return true;
+}
+
 inline void platform_set_current_directory( const char *workingDirectory )
 {
 	SetCurrentDirectory( workingDirectory );

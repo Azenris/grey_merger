@@ -17,6 +17,7 @@ void platform_memset( void *dst, u8 value, u64 bytes );
 [[nodiscard]] inline u64 platform_get_cycle_counter();
 
 // Directory
+bool platform_create_directory( const char *directory );
 inline void platform_set_current_directory( const char *workingDirectory );
 
 // Files
