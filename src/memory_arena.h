@@ -75,8 +75,6 @@ template <typename T> [[nodiscard]] T *memory_arena_transient_allocate( MemoryAr
 [[nodiscard]] u8 *memory_arena_transient_reallocate( MemoryArena *arena, void *p, u64 size );
 void memory_arena_transient_free( MemoryArena *arena, void *p );
 
-#if defined( GAME_DLL ) || defined( ENGINE_SIDE )
-
 // FUNCTION IMPLEMENTATIONS /////////////////////////////////////////////////////
 bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero, u16 alignment )
 {
@@ -339,5 +337,3 @@ void memory_arena_transient_free( MemoryArena *arena, void *p )
 		memoryBlock.lastAlloc = header->prev;
 	}
 }
-
-#endif // defined( GAME_DLL ) || defined( ENGINE_SIDE )
