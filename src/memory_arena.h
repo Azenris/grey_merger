@@ -12,9 +12,13 @@ enum MEMORY_FLAGS : MemoryFlags
 struct MemoryHeader
 {
 	u8 *prev;				// last block before this one
-	u64 reqSize;			// required memory allocation (aligned), 0 if its free memory block
+	u64 reqSize;			// amount allocated
 	u64 size;				// size requested
+	u16 alignment;			// alignment of allocation
+	u16 padding;			// padding used to gain the alignment
 };
+
+static_assert( sizeof( MemoryHeader ) % MEMORY_ALIGNMENT == 0 );
 
 struct MemoryBlockPermanent
 {
@@ -40,22 +44,44 @@ struct MemoryArena
 	MemoryBlockTransient transient;
 };
 
+// Check it's a power of 2
+[[nodiscard ]] inline bool valid_memory_alignment( u64 number )
+{
+	return ( number & ( number - 1 ) ) == 0;
+}
+
 // FUNCTIONS ////////////////////////////////////////////////////////////////////
-bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero = false );
+bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
 void memory_arena_free( MemoryArena *arena );
 inline void memory_arena_update( MemoryArena *arena );
+
 // Permanent Memory
-[[nodiscard]] u8 *memory_arena_permanent_allocate( MemoryArena *arena, u64 size, bool clearZero = false );
+template <typename T> [[nodiscard]] T *memory_arena_permanent_allocate( MemoryArena *arena, bool clearZero = false )
+{
+	return reinterpret_cast<T*>( memory_arena_permanent_allocate( arena, sizeof( T ), clearZero, alignof( T ) ) );
+}
+
+[[nodiscard]] u8 *memory_arena_permanent_allocate( MemoryArena *arena, u64 size, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
 [[nodiscard]] u8 *memory_arena_permanent_reallocate( MemoryArena *arena, void *p, u64 size );
 void memory_arena_permanent_free( MemoryArena *arena, void *p );
+
 // Transient Memory
-[[nodiscard]] u8 *memory_arena_transient_allocate( MemoryArena *arena, u64 size, bool clearZero = false );
+template <typename T> [[nodiscard]] T *memory_arena_transient_allocate( MemoryArena *arena, bool clearZero = false )
+{
+	return reinterpret_cast<T*>( memory_arena_transient_allocate( arena, sizeof( T ), clearZero, alignof( T ) ) );
+}
+
+[[nodiscard]] u8 *memory_arena_transient_allocate( MemoryArena *arena, u64 size, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
 [[nodiscard]] u8 *memory_arena_transient_reallocate( MemoryArena *arena, void *p, u64 size );
 void memory_arena_transient_free( MemoryArena *arena, void *p );
 
+#if defined( GAME_DLL ) || defined( ENGINE_SIDE )
+
 // FUNCTION IMPLEMENTATIONS /////////////////////////////////////////////////////
-bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero )
+bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero, u16 alignment )
 {
+	massert( valid_memory_alignment( alignment ) && alignment >= MEMORY_ALIGNMENT );
+
 	constexpr const u64 permanentMinSize = sizeof( MemoryBlockPermanent ) + sizeof( MemoryHeader );
 	constexpr const u64 transientMinSize = sizeof( MemoryBlockTransient ) + sizeof( MemoryHeader );
 	if ( permanentSize < permanentMinSize ) permanentSize = permanentMinSize;
@@ -64,8 +90,8 @@ bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transie
 	if ( arena->flags & MEMORY_FLAGS_INITIALISED )
 		memory_arena_free( arena );
 
-	u64 permanentReqSize = permanentSize + ( MEMORY_ALIGNMENT - ( permanentSize & ( MEMORY_ALIGNMENT - 1 ) ) );
-	u64 transientReqSize = transientSize + ( MEMORY_ALIGNMENT - ( transientSize & ( MEMORY_ALIGNMENT - 1 ) ) );
+	u64 permanentReqSize = permanentSize + ( alignment - ( permanentSize & ( alignment - 1 ) ) );
+	u64 transientReqSize = transientSize + ( alignment - ( transientSize & ( alignment - 1 ) ) );
 	u64 reqSize = permanentReqSize + transientReqSize;
 	u8 *permanentMemory = nullptr;
 	u8 *transientMemory = nullptr;
@@ -153,17 +179,21 @@ inline void memory_arena_update( MemoryArena *arena )
 }
 
 // Permanent Memory
-[[nodiscard]] u8 *memory_arena_permanent_allocate( MemoryArena *arena, u64 size, bool clearZero )
+[[nodiscard]] u8 *memory_arena_permanent_allocate( MemoryArena *arena, u64 size, bool clearZero, u16 alignment )
 {
 	MemoryBlockPermanent &memoryBlock = arena->permanent;
 
 	massert( size );
+	massert( valid_memory_alignment( alignment ) && alignment >= MEMORY_ALIGNMENT );
 
-	// Include some memory for the header
-	size += sizeof( MemoryHeader );
+	u8 *p = memoryBlock.memory + ( memoryBlock.capacity - memoryBlock.available ) + sizeof( MemoryHeader );
+	u64 padding = alignment - ( reinterpret_cast<u64>( p ) & ( alignment - 1 ) );
 
-	// Align size to MEMORY_ALIGNMENT bytes
-	u64 reqSize = size + ( MEMORY_ALIGNMENT - ( size & ( MEMORY_ALIGNMENT - 1 ) ) );
+	// P now points to the data
+	p += padding;
+
+	// Total size that needs allocating
+	u64 reqSize = padding + sizeof( MemoryHeader ) + size;
 
 	if ( reqSize > memoryBlock.available )
 	{
@@ -171,15 +201,15 @@ inline void memory_arena_update( MemoryArena *arena )
 		return nullptr;
 	}
 
-	u8 *p = memoryBlock.memory + ( memoryBlock.capacity - memoryBlock.available );
-
-	MemoryHeader *header = (MemoryHeader *)p;
+	MemoryHeader *header = reinterpret_cast<MemoryHeader *>( p - sizeof( MemoryHeader ) );
 	header->prev = memoryBlock.lastAlloc;
 	header->reqSize = reqSize;
 	header->size = size;
+	header->alignment = alignment;
+	header->padding = static_cast<u16>( padding );
 
 	memoryBlock.available -= reqSize;
-	memoryBlock.lastAlloc = p + sizeof( MemoryHeader );
+	memoryBlock.lastAlloc = p;
 
 	if ( clearZero )
 		memset( memoryBlock.lastAlloc, 0, size );
@@ -199,17 +229,21 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 }
 
 // Transient Memory
-[[nodiscard]] u8 *memory_arena_transient_allocate( MemoryArena *arena, u64 size, bool clearZero )
+[[nodiscard]] u8 *memory_arena_transient_allocate( MemoryArena *arena, u64 size, bool clearZero, u16 alignment )
 {
 	MemoryBlockTransient &memoryBlock = arena->transient;
 
 	massert( size );
+	massert( valid_memory_alignment( alignment ) && alignment >= MEMORY_ALIGNMENT );
 
-	// Include some memory for the header
-	size += sizeof( MemoryHeader );
+	u8 *p = memoryBlock.memory + ( memoryBlock.capacity - memoryBlock.available ) + sizeof( MemoryHeader );
+	u64 padding = alignment - ( reinterpret_cast<u64>( p ) & ( alignment - 1 ) );
 
-	// Align size to MEMORY_ALIGNMENT bytes
-	u64 reqSize = size + ( MEMORY_ALIGNMENT - ( size & ( MEMORY_ALIGNMENT - 1 ) ) );
+	// P now points to the data
+	p += padding;
+
+	// Total size that needs allocating
+	u64 reqSize = padding + sizeof( MemoryHeader ) + size;
 
 	if ( reqSize > memoryBlock.available )
 	{
@@ -217,15 +251,15 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 		return nullptr;
 	}
 
-	u8 *p = memoryBlock.memory + ( memoryBlock.capacity - memoryBlock.available );
-
-	MemoryHeader *header = (MemoryHeader *)p;
+	MemoryHeader *header = reinterpret_cast<MemoryHeader *>( p - sizeof( MemoryHeader ) );
 	header->prev = memoryBlock.lastAlloc;
 	header->reqSize = reqSize;
 	header->size = size;
+	header->alignment = alignment;
+	header->padding = static_cast<u16>( padding );
 
 	memoryBlock.available -= reqSize;
-	memoryBlock.lastAlloc = p + sizeof( MemoryHeader );
+	memoryBlock.lastAlloc = p;
 
 	if ( clearZero )
 		memset( memoryBlock.lastAlloc, 0, size );
@@ -242,7 +276,11 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 
 	MemoryBlockTransient &memoryBlock = arena->transient;
 
-	MemoryHeader *header = (MemoryHeader *)( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
+	MemoryHeader *header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
+
+	// Same size
+	if ( size == header->size )
+		return static_cast<u8 *>( p );
 
 	u64 oldSize = header->size;
 	u64 oldReqSize = header->reqSize;
@@ -250,24 +288,22 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 	// See if it was the last used allocation
 	if ( memoryBlock.lastAlloc == p )
 	{
-		// Include some memory for the header
-		size += sizeof( MemoryHeader );
+		u64 reqSize = header->padding + sizeof( MemoryHeader ) + size;
 
-		// Align size to MEMORY_ALIGNMENT bytes
-		u64 reqSize = size + ( MEMORY_ALIGNMENT - ( size & ( MEMORY_ALIGNMENT - 1 ) ) );
-
-		if ( size < oldSize )
+		// Either shrinking or same required memory
+		if ( size < oldSize || reqSize == oldReqSize )
 		{
-			// Shrinking memory used
 			header->reqSize = reqSize;
 			header->size = size;
 			memoryBlock.available += ( oldReqSize - reqSize );
 			return static_cast<u8 *>( p );
 		}
 
-		if ( reqSize > memoryBlock.available )
+		u64 extraReqSizeNeeded = ( reqSize - oldReqSize );
+
+		if ( extraReqSizeNeeded > memoryBlock.available )
 		{
-			show_log_error( "Failed to grow memory by %d bytes.", reqSize );
+			show_log_error( "Failed to grow memory by %d bytes.", extraReqSizeNeeded );
 			return nullptr;
 		}
 
@@ -275,16 +311,16 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 		header->size = size;
 
 		// Remove the extra space required for this reallocation
-		memoryBlock.available -= ( reqSize - oldReqSize );
+		memoryBlock.available -= extraReqSizeNeeded;
 
 		return static_cast<u8 *>( p );
 	}
 
 	// Since it wasn't the last allocation, allocate a new block and copy the data over
-	u8 *newMemory = memory_arena_transient_allocate( arena, size );
+	u8 *newMemory = memory_arena_transient_allocate( arena, size, false, header->alignment );
 
-	if ( newMemory != nullptr )
-		memcpy( newMemory, p, oldSize );
+	if ( newMemory )
+		memcpy( newMemory, p, size < oldSize ? size : oldSize );
 
 	memory_arena_transient_free( arena, p );
 
@@ -297,9 +333,11 @@ void memory_arena_transient_free( MemoryArena *arena, void *p )
 
 	if ( p && memoryBlock.lastAlloc == p )
 	{
-		MemoryHeader *header = (MemoryHeader *)( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
+		MemoryHeader *header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
 		u64 reqSize = header->reqSize;
 		memoryBlock.available += reqSize;
 		memoryBlock.lastAlloc = header->prev;
 	}
 }
+
+#endif // defined( GAME_DLL ) || defined( ENGINE_SIDE )
