@@ -1,12 +1,13 @@
 
 #pragma once
 
-// MEMORY ARENA /////////////////////////////////////////////////////////////////
+#define MEMORY_ALIGNMENT		sizeof( u64 )
+
 using MemoryFlags = u32;
 enum MEMORY_FLAGS : MemoryFlags
 {
 	MEMORY_FLAGS_INITIALISED			= BIT( 0 ),
-	MEMORY_FLAGS_SEPERATE_ALLOCATIONS	= BIT( 1 ),
+	MEMORY_FLAGS_SEPARATE_ALLOCATIONS	= BIT( 1 ),
 };
 
 struct MemoryHeader
@@ -14,107 +15,148 @@ struct MemoryHeader
 	u8 *prev;				// last block before this one
 	u64 reqSize;			// amount allocated
 	u64 size;				// size requested
+	u8 *attachedTo;			// when free's it will rewind to this allocation
 	u16 alignment;			// alignment of allocation
 	u16 padding;			// padding used to gain the alignment
 };
 
 static_assert( sizeof( MemoryHeader ) % MEMORY_ALIGNMENT == 0 );
 
-struct MemoryBlockPermanent
+struct Allocator
 {
 	u64 capacity;
 	u64 available;
 	u8 *memory;
 	u8 *lastAlloc;
-};
 
-struct MemoryBlockTransient
-{
-	u64 capacity;
-	u64 available;
-	u8 *memory;
-	u8 *lastAlloc;
+	u8 *( *allocate_func )( Allocator *allocator, u64 size, bool clearZero, u16 alignment );
+	u8 *( *reallocate_func )( Allocator *allocator, void *p, u64 size );
+	void ( *shrink_func )( Allocator *allocator, void *p, u64 size );
+	void ( *free_func )( Allocator *allocator, void *p );
+	void ( *attach_func )( Allocator *allocator, void *p, void *to );
+
+	// METHODS ////////////////////////////////////
+	template <typename T> [[nodiscard]] inline T *allocate( bool clearZero );
+	template <typename T> [[nodiscard]] inline T *allocate( u32 size, bool clearZero );
+	template <typename T> [[nodiscard]] inline T *allocate( u32 size, bool clearZero, u16 alignment );
+	template <typename T> [[nodiscard]] inline T *allocate( u64 size, bool clearZero );
+	template <typename T> [[nodiscard]] inline T *allocate( u64 size, bool clearZero, u16 alignment );
+	template <typename T> [[nodiscard]] inline T *reallocate( void *p, u64 size );
+	inline void shrink( void *p, u64 size );
+	inline void free( void *p );
+	inline void attach( void *p, void *to );
 };
 
 struct MemoryArena
 {
+	bool init( u64 permanentSize, u64 transientSize, u64 fastBumpSize, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
+	void free();
+	void update();
+
 	MemoryFlags flags = 0;
 	u8 *memory = nullptr;
-	MemoryBlockPermanent permanent;
-	MemoryBlockTransient transient;
+	Allocator permanent = {};
+	Allocator transient = {};
+	Allocator fastBump = {};
 };
 
-// Check it's a power of 2
-[[nodiscard ]] inline bool valid_memory_alignment( u64 number )
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+template <typename T>
+[[nodiscard]] inline T *Allocator::allocate( bool clearZero = false )
 {
-	return ( number & ( number - 1 ) ) == 0;
+	return reinterpret_cast<T*>( allocate_func( this, sizeof( T ), clearZero, alignof( T ) ) );
 }
 
-// FUNCTIONS ////////////////////////////////////////////////////////////////////
-bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
-void memory_arena_free( MemoryArena *arena );
-inline void memory_arena_update( MemoryArena *arena );
-
-// Permanent Memory
-template <typename T> [[nodiscard]] T *memory_arena_permanent_allocate( MemoryArena *arena, bool clearZero = false )
+template <typename T>
+[[nodiscard]] inline T *Allocator::allocate( u32 size, bool clearZero = false )
 {
-	return reinterpret_cast<T*>( memory_arena_permanent_allocate( arena, sizeof( T ), clearZero, alignof( T ) ) );
+	return reinterpret_cast<T*>( allocate_func( this, size * sizeof( T ), clearZero, alignof( T ) ) );
 }
 
-[[nodiscard]] u8 *memory_arena_permanent_allocate( MemoryArena *arena, u64 size, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
-[[nodiscard]] u8 *memory_arena_permanent_reallocate( MemoryArena *arena, void *p, u64 size );
-void memory_arena_permanent_free( MemoryArena *arena, void *p );
-
-// Transient Memory
-template <typename T> [[nodiscard]] T *memory_arena_transient_allocate( MemoryArena *arena, bool clearZero = false )
+template <typename T>
+[[nodiscard]] inline T *Allocator::allocate( u32 size, bool clearZero, u16 alignment )
 {
-	return reinterpret_cast<T*>( memory_arena_transient_allocate( arena, sizeof( T ), clearZero, alignof( T ) ) );
+	return reinterpret_cast<T*>( allocate_func( this, size * sizeof( T ), clearZero, alignment ) );
 }
 
-[[nodiscard]] u8 *memory_arena_transient_allocate( MemoryArena *arena, u64 size, bool clearZero = false, u16 alignment = MEMORY_ALIGNMENT );
-[[nodiscard]] u8 *memory_arena_transient_reallocate( MemoryArena *arena, void *p, u64 size );
-void memory_arena_transient_free( MemoryArena *arena, void *p );
-
-// FUNCTION IMPLEMENTATIONS /////////////////////////////////////////////////////
-bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transientSize, bool clearZero, u16 alignment )
+template <typename T>
+[[nodiscard]] inline T *Allocator::allocate( u64 size, bool clearZero = false )
 {
-	massert( valid_memory_alignment( alignment ) && alignment >= MEMORY_ALIGNMENT );
+	return reinterpret_cast<T*>( allocate_func( this, size * sizeof( T ), clearZero, alignof( T ) ) );
+}
 
-	constexpr const u64 permanentMinSize = sizeof( MemoryBlockPermanent ) + sizeof( MemoryHeader );
-	constexpr const u64 transientMinSize = sizeof( MemoryBlockTransient ) + sizeof( MemoryHeader );
+template <typename T>
+[[nodiscard]] inline T *Allocator::allocate( u64 size, bool clearZero, u16 alignment )
+{
+	return reinterpret_cast<T*>( allocate_func( this, size * sizeof( T ), clearZero, alignment ) );
+}
+
+template <typename T>
+[[nodiscard]] inline T *Allocator::reallocate( void *p, u64 size )
+{
+	return reinterpret_cast<T*>( reallocate_func( this, p, size ) );
+}
+
+inline void Allocator::shrink( void *p, u64 size )
+{
+	return shrink_func( this, p, size );
+}
+
+inline void Allocator::free( void *p )
+{
+	return free_func( this, p );
+}
+
+inline void Allocator::attach( void *p, void *to )
+{
+	return attach_func( this, p, to );
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+bool MemoryArena::init( u64 permanentSize, u64 transientSize, u64 fastBumpSize, bool clearZero, u16 alignment )
+{
+	constexpr const u64 permanentMinSize = sizeof( Allocator ) + sizeof( MemoryHeader );
+	constexpr const u64 transientMinSize = sizeof( Allocator ) + sizeof( MemoryHeader );
+	constexpr const u64 fastBumpMinSize = sizeof( Allocator );
 	if ( permanentSize < permanentMinSize ) permanentSize = permanentMinSize;
 	if ( transientSize < transientMinSize ) transientSize = transientMinSize;
+	if ( fastBumpSize < fastBumpMinSize ) fastBumpSize = fastBumpMinSize;
 
-	if ( arena->flags & MEMORY_FLAGS_INITIALISED )
-		memory_arena_free( arena );
+	if ( flags & MEMORY_FLAGS_INITIALISED )
+		free();
 
 	u64 permanentReqSize = permanentSize + ( alignment - ( permanentSize & ( alignment - 1 ) ) );
 	u64 transientReqSize = transientSize + ( alignment - ( transientSize & ( alignment - 1 ) ) );
-	u64 reqSize = permanentReqSize + transientReqSize;
+	u64 fastBumpReqSize = fastBumpSize + ( alignment - ( fastBumpSize & ( alignment - 1 ) ) );
+	u64 reqSize = permanentReqSize + transientReqSize + fastBumpReqSize;
 	u8 *permanentMemory = nullptr;
 	u8 *transientMemory = nullptr;
+	u8 *fastBumpMemory = nullptr;
 
-	arena->memory = (u8 *)malloc( reqSize );
+	memory = (u8 *)malloc( reqSize );
 
 	// If the memory allocation fails, attempt to allocate
-	// seperately for the memory blocks
-	if ( !arena->memory )
+	// separately for the memory blocks
+	if ( !memory )
 	{
 		permanentMemory = (u8 *)malloc( permanentReqSize );
 		transientMemory = (u8 *)malloc( transientReqSize );
-		arena->memory = permanentMemory;
-		arena->flags |= MEMORY_FLAGS_SEPERATE_ALLOCATIONS;
+		fastBumpMemory = (u8 *)malloc( fastBumpReqSize );
+		memory = permanentMemory;
+		flags |= MEMORY_FLAGS_SEPARATE_ALLOCATIONS;
 	}
 	else
 	{
-		permanentMemory = arena->memory;
+		permanentMemory = memory;
 		transientMemory = permanentMemory + permanentReqSize;
-		arena->flags &= ~MEMORY_FLAGS_SEPERATE_ALLOCATIONS;
+		fastBumpMemory = transientMemory + transientReqSize;
+		flags &= ~MEMORY_FLAGS_SEPARATE_ALLOCATIONS;
 	}
 
-	if ( !permanentMemory || !transientMemory )
+	if ( !permanentMemory || !transientMemory || !fastBumpMemory )
 	{
-		show_log_error( "memory_arena_initialise failed to allocate %d bytes.", reqSize );
 		return false;
 	}
 
@@ -122,69 +164,64 @@ bool memory_arena_initialise( MemoryArena *arena, u64 permanentSize, u64 transie
 	{
 		memset( permanentMemory, 0, permanentReqSize );
 		memset( transientMemory, 0, transientReqSize );
+		memset( fastBumpMemory, 0, fastBumpReqSize );
 	}
 
-	MemoryBlockPermanent permanentMemoryBlock =
-	{
-		.capacity = permanentSize,
-		.available = permanentSize,
-		.memory = permanentMemory,
-		.lastAlloc = nullptr,
-	};
+	permanent.capacity = permanentSize;
+	permanent.available = permanentSize;
+	permanent.memory = permanentMemory;
+	permanent.lastAlloc = nullptr;
 
-	MemoryBlockTransient transientMemoryBlock =
-	{
-		.capacity = transientSize,
-		.available = transientSize,
-		.memory = transientMemory,
-		.lastAlloc = nullptr,
-	};
+	transient.capacity = transientSize;
+	transient.available = transientSize;
+	transient.memory = transientMemory;
+	transient.lastAlloc = nullptr;
 
-	arena->permanent = permanentMemoryBlock;
-	arena->transient = transientMemoryBlock;
+	fastBump.capacity = fastBumpSize;
+	fastBump.available = fastBumpSize;
+	fastBump.memory = fastBumpMemory;
+	fastBump.lastAlloc = nullptr;
 
-	arena->flags |= MEMORY_FLAGS_INITIALISED;
+	flags |= MEMORY_FLAGS_INITIALISED;
 
 	return true;
 }
 
-void memory_arena_free( MemoryArena *arena )
+void MemoryArena::free()
 {
-	massert( arena );
-
-	if ( arena->flags & MEMORY_FLAGS_INITIALISED )
+	if ( flags & MEMORY_FLAGS_INITIALISED )
 	{
 		// Check if it was a single allocation or 2 seperate ones
-		if ( arena->flags & MEMORY_FLAGS_SEPERATE_ALLOCATIONS )
+		if ( flags & MEMORY_FLAGS_SEPARATE_ALLOCATIONS )
 		{
-			free( arena->permanent.memory );
-			free( arena->transient.memory );
+			::free( permanent.memory );
+			::free( transient.memory );
+			::free( fastBump.memory );
 		}
 		else
 		{
-			free( arena->memory );
+			::free( memory );
 		}
 
-		memset( arena, 0, sizeof( *arena ) );
+		memset( this, 0, sizeof( *this ) );
 	}
 }
 
-inline void memory_arena_update( MemoryArena *arena )
+void MemoryArena::update()
 {
-	MemoryBlockTransient &transientMemory = arena->transient;
-	transientMemory.available = transientMemory.capacity;
-	transientMemory.lastAlloc = nullptr;
+	transient.available = transient.capacity;
+	transient.lastAlloc = nullptr;
+
+	fastBump.available = fastBump.capacity;
+	fastBump.lastAlloc = nullptr;
 }
 
-// Permanent Memory
-[[nodiscard]] u8 *memory_arena_permanent_allocate( MemoryArena *arena, u64 size, bool clearZero, u16 alignment )
+// BUMP ALLOCATOR ////////////////////////////////////////////////////////////////////////////////////////////////////
+[[nodiscard]] u8 *memory_bump_allocate( Allocator *allocator, u64 size, bool clearZero, u16 alignment )
 {
-	MemoryBlockPermanent &memoryBlock = arena->permanent;
+	assert( size );
 
-	massert( size );
-	massert( valid_memory_alignment( alignment ) && alignment >= MEMORY_ALIGNMENT );
-
-	u8 *p = memoryBlock.memory + ( memoryBlock.capacity - memoryBlock.available ) + sizeof( MemoryHeader );
+	u8 *p = allocator->memory + ( allocator->capacity - allocator->available ) + sizeof( MemoryHeader );
 	u64 padding = alignment - ( reinterpret_cast<u64>( p ) & ( alignment - 1 ) );
 
 	// P now points to the data
@@ -193,86 +230,34 @@ inline void memory_arena_update( MemoryArena *arena )
 	// Total size that needs allocating
 	u64 reqSize = padding + sizeof( MemoryHeader ) + size;
 
-	if ( reqSize > memoryBlock.available )
+	if ( reqSize > allocator->available )
 	{
-		show_log_error( "Failed to allocate %d bytes memory.", reqSize );
 		return nullptr;
 	}
 
 	MemoryHeader *header = reinterpret_cast<MemoryHeader *>( p - sizeof( MemoryHeader ) );
-	header->prev = memoryBlock.lastAlloc;
+	header->prev = allocator->lastAlloc;
 	header->reqSize = reqSize;
 	header->size = size;
+	header->attachedTo = nullptr;
 	header->alignment = alignment;
 	header->padding = static_cast<u16>( padding );
 
-	memoryBlock.available -= reqSize;
-	memoryBlock.lastAlloc = p;
+	allocator->available -= reqSize;
+	allocator->lastAlloc = p;
 
 	if ( clearZero )
-		memset( memoryBlock.lastAlloc, 0, size );
+		memset( allocator->lastAlloc, 0, size );
 
-	return memoryBlock.lastAlloc;
+	return allocator->lastAlloc;
 }
 
-[[nodiscard]] u8 *memory_arena_permanent_reallocate( MemoryArena *arena, void *p, u64 size )
-{
-	show_log_error( "NYI memory_arena_permanent_reallocate" );
-	return nullptr;
-}
-
-void memory_arena_permanent_free( MemoryArena *arena, void *p )
-{
-	show_log_error( "NYI memory_arena_permanent_free" );
-}
-
-// Transient Memory
-[[nodiscard]] u8 *memory_arena_transient_allocate( MemoryArena *arena, u64 size, bool clearZero, u16 alignment )
-{
-	MemoryBlockTransient &memoryBlock = arena->transient;
-
-	massert( size );
-	massert( valid_memory_alignment( alignment ) && alignment >= MEMORY_ALIGNMENT );
-
-	u8 *p = memoryBlock.memory + ( memoryBlock.capacity - memoryBlock.available ) + sizeof( MemoryHeader );
-	u64 padding = alignment - ( reinterpret_cast<u64>( p ) & ( alignment - 1 ) );
-
-	// P now points to the data
-	p += padding;
-
-	// Total size that needs allocating
-	u64 reqSize = padding + sizeof( MemoryHeader ) + size;
-
-	if ( reqSize > memoryBlock.available )
-	{
-		show_log_error( "Failed to allocate %d bytes memory.", reqSize );
-		return nullptr;
-	}
-
-	MemoryHeader *header = reinterpret_cast<MemoryHeader *>( p - sizeof( MemoryHeader ) );
-	header->prev = memoryBlock.lastAlloc;
-	header->reqSize = reqSize;
-	header->size = size;
-	header->alignment = alignment;
-	header->padding = static_cast<u16>( padding );
-
-	memoryBlock.available -= reqSize;
-	memoryBlock.lastAlloc = p;
-
-	if ( clearZero )
-		memset( memoryBlock.lastAlloc, 0, size );
-
-	return memoryBlock.lastAlloc;
-}
-
-[[nodiscard]] u8 *memory_arena_transient_reallocate( MemoryArena *arena, void *p, u64 size )
+[[nodiscard]] u8 *memory_bump_reallocate( Allocator *allocator, void *p, u64 size )
 {
 	if ( !p )
-		return memory_arena_transient_allocate( arena, size );
+		return allocator->allocate<u8>( size );
 
-	massert( size );
-
-	MemoryBlockTransient &memoryBlock = arena->transient;
+	assert( size );
 
 	MemoryHeader *header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
 
@@ -284,7 +269,7 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 	u64 oldReqSize = header->reqSize;
 
 	// See if it was the last used allocation
-	if ( memoryBlock.lastAlloc == p )
+	if ( allocator->lastAlloc == p )
 	{
 		u64 reqSize = header->padding + sizeof( MemoryHeader ) + size;
 
@@ -293,15 +278,14 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 		{
 			header->reqSize = reqSize;
 			header->size = size;
-			memoryBlock.available += ( oldReqSize - reqSize );
+			allocator->available += ( oldReqSize - reqSize );
 			return static_cast<u8 *>( p );
 		}
 
 		u64 extraReqSizeNeeded = ( reqSize - oldReqSize );
 
-		if ( extraReqSizeNeeded > memoryBlock.available )
+		if ( extraReqSizeNeeded > allocator->available )
 		{
-			show_log_error( "Failed to grow memory by %d bytes.", extraReqSizeNeeded );
 			return nullptr;
 		}
 
@@ -309,31 +293,119 @@ void memory_arena_permanent_free( MemoryArena *arena, void *p )
 		header->size = size;
 
 		// Remove the extra space required for this reallocation
-		memoryBlock.available -= extraReqSizeNeeded;
+		allocator->available -= extraReqSizeNeeded;
 
 		return static_cast<u8 *>( p );
 	}
 
 	// Since it wasn't the last allocation, allocate a new block and copy the data over
-	u8 *newMemory = memory_arena_transient_allocate( arena, size, false, header->alignment );
+	u8 *newMemory = allocator->allocate<u8>( size, false, header->alignment );
 
-	if ( newMemory )
-		memcpy( newMemory, p, size < oldSize ? size : oldSize );
+	if ( !newMemory )
+	{
+		return static_cast<u8 *>( p );
+	}
 
-	memory_arena_transient_free( arena, p );
+	memcpy( newMemory, p, size < oldSize ? size : oldSize );
+
+	allocator->free( p );
 
 	return newMemory;
 }
 
-void memory_arena_transient_free( MemoryArena *arena, void *p )
+void memory_bump_shrink( Allocator *allocator, void *p, u64 size )
 {
-	MemoryBlockTransient &memoryBlock = arena->transient;
+	assert( p );
+	assert( size );
 
-	if ( p && memoryBlock.lastAlloc == p )
+	MemoryHeader *header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
+
+	// Same size
+	if ( size == header->size )
+		return;
+
+	u64 oldSize = header->size;
+	u64 oldReqSize = header->reqSize;
+	u64 reqSize = header->padding + sizeof( MemoryHeader ) + size;
+
+	if ( size > oldSize )
+	{
+		return;
+	}
+
+	// If it was the last allocation, the required size can be shrunk too
+	if ( allocator->lastAlloc == p )
+	{
+		// Give the memory back, and update the new required size
+		header->reqSize = reqSize;
+		allocator->available += ( oldReqSize - reqSize );
+	}
+
+	// Update the size of this block
+	header->size = size;
+}
+
+void memory_bump_free( Allocator *allocator, void *p )
+{
+	if ( !p || allocator->lastAlloc != p )
+		return;
+
+	MemoryHeader *header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
+	if ( !header->attachedTo )
+	{
+		u64 reqSize = header->reqSize;
+		allocator->available += reqSize;
+		allocator->lastAlloc = header->prev;
+		return;
+	}
+
+	// It requires rewinding until a certain allocation
+	u8 *until = header->attachedTo;
+	while ( p && until && p >= until )
+	{
+		header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
+		u64 reqSize = header->reqSize;
+		allocator->available += reqSize;
+		allocator->lastAlloc = header->prev;
+		if ( header->attachedTo )
+			until = ( until <= header->attachedTo ? until : header->attachedTo );
+		p = header->prev;
+	}
+}
+
+void memory_bump_attach( Allocator *allocator, void *p, void *to )
+{
+	if ( p && to && to < p )
 	{
 		MemoryHeader *header = reinterpret_cast<MemoryHeader*>( static_cast<u8 *>( p ) - sizeof( MemoryHeader ) );
-		u64 reqSize = header->reqSize;
-		memoryBlock.available += reqSize;
-		memoryBlock.lastAlloc = header->prev;
+		header->attachedTo = static_cast<u8 *>( to );
 	}
+}
+
+// FAST BUMP ALLOCATOR ///////////////////////////////////////////////////////////////////////////////////////////////
+[[nodiscard]] u8 *memory_fast_bump_allocate( Allocator *allocator, u64 size, bool clearZero, u16 alignment )
+{
+	assert( size );
+
+	u8 *p = allocator->memory + ( allocator->capacity - allocator->available );
+	u64 padding = alignment - ( reinterpret_cast<u64>( p ) & ( alignment - 1 ) );
+
+	// P now points to the data
+	p += padding;
+
+	// Total size that needs allocating
+	u64 reqSize = padding + size;
+
+	if ( reqSize > allocator->available )
+	{
+		return nullptr;
+	}
+
+	allocator->available -= reqSize;
+	allocator->lastAlloc = p;
+
+	if ( clearZero )
+		memset( allocator->lastAlloc, 0, size );
+
+	return allocator->lastAlloc;
 }

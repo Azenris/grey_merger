@@ -13,7 +13,7 @@ enum RESULT_CODE : u32
 	RESULT_CODE_FAILED_TO_CREATE_OUTPUT_FILE,
 };
 
-static inline const char *error_code_string( RESULT_CODE code )
+static const char *error_code_string( RESULT_CODE code )
 {
 	switch ( code )
 	{

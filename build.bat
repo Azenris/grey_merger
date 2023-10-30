@@ -35,20 +35,14 @@ SET flags=-std:c++20 -Zc:preprocessor -Zc:strictStrings -GR-
 if %debugMode% == 1 (
 	SET defines=%defines% -DDEBUG
 	SET flags=%flags% -Z7 -FC -MDd
-	SET links=%links% third_party\zlib\zlibd64.lib
 ) else (
 	SET flags=%flags% -MD -O2 -Ot -GF
-	SET links=%links% third_party\zlib\zlib64.lib
 )
 
 if not exist %buildDir% ( mkdir %buildDir% )
 if not exist %objectDir% ( mkdir %objectDir% )
 
-del %buildDir%*.pdb > NUL 2> NUL
-
-SET commands=-nologo %flags% %warnings% %defines% %math%
-
-cl %commands% -Fe%buildDir%%name%.exe -Fo%objectDir% src\main.cpp %includes% %links% -INCREMENTAL:NO
+cl -nologo %flags% %warnings% %defines% %math% -Fe%buildDir%%name%.exe -Fo%objectDir% src\main.cpp %includes% %links% -INCREMENTAL:NO
 if not %ERRORLEVEL% == 0 ( goto build_failed )
 
 :build_success

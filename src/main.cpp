@@ -1,24 +1,33 @@
 
-// System includes
+// System Includes
+#include <stdio.h>
 #include <stdarg.h>
+#include <assert.h>
 #include <cmath>
+
+// Platform Specific Includes
+#ifdef PLATFORM_WINDOWS
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
+// Third Party Includes
+#include "stb_image.h"
+#include "stb_image_write.h"
 
 // Includes
 #include "defines.h"
-#include "logging.h"
-#include "platform.h"
-#include "zlib\zlib.h"
 #include "array.h"
-#include "strings.h"
 #include "map.h"
 #include "memory_arena.h"
-#include "utility.h"
 #include "error_codes.h"
-#include "stb_image.h"
-#include "stb_image_write.h"
-#include "platform_windows.cpp"
 
-MemoryArena arena;
+struct App
+{
+	MemoryArena memory;
+
+} app;
 
 #include "image.h"
 
@@ -47,48 +56,295 @@ struct Options
 
 } options;
 
+static void log( const char *message, ... )
+{
+	va_list args;
+	va_start( args, message );
+	vfprintf( stdout, message, args );
+	va_end( args );
+	fprintf( stderr, "\n" );
+}
+
+static void log_warning( const char *message, ... )
+{
+	va_list args;
+	va_start( args, message );
+	vfprintf( stderr, message, args );
+	va_end( args );
+	fprintf( stderr, "\n" );
+}
+
+static void log_error( const char *message, ... )
+{
+	va_list args;
+	va_start( args, message );
+	vfprintf( stderr, message, args );
+	va_end( args );
+	fprintf( stderr, "\n" );
+}
+
 static int usage_message( RESULT_CODE code )
 {
-	show_log_warning( "\nERROR_CODE: %s\n", error_code_string( code ) );
-	show_log_info( ":: USAGE ::" );
-	show_log_message( "Expects %s <commands>", options.programName );
-	show_log_message( "Eg. %s %s\n", options.programName, "-channel-r test\\image_0.png -channel-b test\\image_1.png -o test\\merged.png" );
-	show_log_info( "COMMANDS" );
-	show_log_message( "[-v]                         EG. -v                                             (enable verbose outputs)" );
-	show_log_message( "[-ra]                        EG. -ra                                            (outputs received arguments)" );
-	show_log_message( "[-wd] <path>                 EG. -wd TEMP\\                                      (override the default working directory)" );
-	show_log_message( "[-channel-r] <file>          EG. -channel-r assets\\image\\image_r.png        (input file for red channel)" );
-	show_log_message( "[-channel-g] <file>          EG. -channel-g assets\\image\\image_g.png        (input file for green channel)" );
-	show_log_message( "[-channel-b] <file>          EG. -channel-b assets\\image\\image_b.png        (input file for blue channel)" );
-	show_log_message( "[-o] <file>                  EG. -o assets\\image\\mergedimg.png                  (override the default output file)" );
-	show_log_message( "[-memory] <bytes>            EG. -memory 1024                                   (specify memory allocation))" );
-
-#ifdef DEBUG
-	system( "pause" );
-#endif
+	log( "\nERROR_CODE: %s\n", error_code_string( code ) );
+	log( ":: USAGE ::" );
+	log( "Expects %s <commands>", options.programName );
+	log( "Eg. %s %s\n", options.programName, "-channel-r test\\image_0.png -channel-b test\\image_1.png -o test\\merged.png" );
+	log( "COMMANDS" );
+	log( "[-v]                         EG. -v                                             (enable verbose outputs)" );
+	log( "[-ra]                        EG. -ra                                            (outputs received arguments)" );
+	log( "[-wd] <path>                 EG. -wd TEMP\\                                      (override the default working directory)" );
+	log( "[-channel-r] <file>          EG. -channel-r assets\\image\\image_r.png        (input file for red channel)" );
+	log( "[-channel-g] <file>          EG. -channel-g assets\\image\\image_g.png        (input file for green channel)" );
+	log( "[-channel-b] <file>          EG. -channel-b assets\\image\\image_b.png        (input file for blue channel)" );
+	log( "[-o] <file>                  EG. -o assets\\image\\mergedimg.png                  (override the default output file)" );
+	log( "[-memory] <bytes>            EG. -memory 1024                                   (specify memory allocation))" );
 
 	return code;
 }
 
-RESULT_CODE read_channel_image( ImageChannel *imgChannel, const char *path, u32 *w, u32 *h )
+static u64 string_copy( char *destination, u64 destSize, const char *source )
 {
-	imgChannel->image = platform_read_image( path, &imgChannel->w, &imgChannel->h, &imgChannel->channels );
+	assert( destSize >= 1 );
+	assert( source );
+
+	const char *sourceStart = source;
+
+	while ( *source != '\0' && --destSize > 0 )
+	{
+		*destination++ = *source++;
+	}
+
+	*destination = '\0';
+
+	return source - sourceStart;
+}
+
+static u64 string_append( char *destination, u64 destSize, const char *append )
+{
+	assert( destination );
+	assert( append );
+
+	u64 bytes = 0;
+	{
+		const char *str = destination;
+		while ( *str++ != '\0' )
+		{
+			bytes += 1;
+		}
+	}
+
+	u64 appendBytes = 0;
+	{
+		const char *str = append;
+		while ( *str++ != '\0' )
+		{
+			appendBytes += 1;
+		}
+		appendBytes += 1;
+	}
+
+	// Check there is enough room to append
+	if ( ( destSize - bytes ) < appendBytes )
+		return 0;
+
+	strcpy( destination + bytes, append );
+
+	// Doesn't include null terminator
+	return appendBytes - 1;
+}
+
+[[nodiscard]] static u64 string_span( const char *tok, const char *delim )
+{
+	assert( tok && delim );
+
+	u64 i, j;
+
+	for ( i = 0; tok[ i ] != '\0'; ++i )
+		for ( j = 0; delim[ j ] != '\0'; ++j )
+			if ( tok[ i ] == delim[ j ] )
+				return i;
+
+	return i;
+}
+
+[[nodiscard]] static u64 string_nspan( const char *tok, const char *delim )
+{
+	assert( tok && delim );
+
+	u64 i, j;
+
+	for ( i = 0; tok[ i ] != '\0'; ++i )
+	{
+		bool delimFound = false;
+
+		for ( j = 0; delim[ j ] != '\0'; ++j )
+		{
+			if ( tok[ i ] == delim[ j ] )
+			{
+				delimFound = true;
+				break;
+			}
+		}
+
+		if ( !delimFound )
+			return i;
+	}
+
+	return i;
+}
+
+[[nodiscard]] static char *string_tokenise( char *str, const char *delim, const char **token, char *found )
+{
+	// Invalid input
+	if ( !str )
+	{
+		*token = nullptr;
+		return nullptr;
+	}
+
+	// Add a count of characters until a NON delimiter is found
+	str += string_nspan( str, delim );
+
+	// No NON delimiter found, reached end of string
+	if ( *str == '\0' )
+	{
+		*token = nullptr;
+		return nullptr;
+	}
+
+	*token = str;
+
+	// Set e to str + a count of characters until a delimiter IS found
+	char *e = str + string_span( str, delim );
+
+	// If there was a break on \r && the next char is \n && you was looking for \r\n
+	// Then return the delim found as \n
+	u64 crlfSkip = 0;
+	if ( *e == '\r' && *( e + 1 ) == '\n' )
+	{
+		crlfSkip = 1;
+		if ( found )
+			*found = '\n';
+	}
+	// Which delimiter was found
+	else if ( found )
+		*found = *e;
+
+	// If it didn't reached the end of the string
+	// it will need a null terminator inserting and
+	// the new position of the string returned
+	if ( *e != '\0' )
+	{
+		*e = '\0';
+		return e + 1 + crlfSkip;
+	}
+
+	return nullptr;
+}
+
+static bool make_directory( const char *directory )
+{
+	char pathMem[ 4096 ];
+	if ( string_copy( pathMem, sizeof( pathMem ), directory ) == 0 )
+		return false;
+
+	char *path = pathMem;
+	const char *token;
+	const char *delimiters = "./\\";
+	char delim;
+	char dir[ 4096 ] = "\0";
+
+	if ( *path == '.' )
+	{
+		path += 1;
+
+		if ( *path == '/' || *path == '\\' )
+		{
+			// ./ (current directory)
+			string_append( dir, sizeof( dir ), "./" );
+		}
+		else if ( *path == '.' )
+		{
+			path += 1;
+
+			// ../ (moving up from current directory)
+			if ( *path == '/' || *path == '\\' )
+			{
+				// ./ (current directory)
+				string_append( dir, sizeof( dir ), "../" );
+			}
+		}
+	}
+
+	path = string_tokenise( path, delimiters, &token, &delim );
+
+	while ( token )
+	{
+		if ( delim == '.' )
+		{
+			// file ext
+			return true;
+		}
+
+		string_append( dir, sizeof( dir ), token );
+		string_append( dir, sizeof( dir ), "/" );
+
+		#ifdef PLATFORM_WINDOWS
+			_mkdir( dir );
+		#else
+			mkdir( dir, 0777 );
+		#endif
+
+		path = string_tokenise( path, delimiters, &token, &delim );
+	}
+
+	return true;
+}
+
+[[nodiscard]] static u8 *read_image( const char *filename, u32 *width, u32 *height, u32 *channels )
+{
+	assert( *channels <= 4 );
+
+	int w, h, c;
+
+	u8 *data = (u8 *)stbi_load( filename, &w, &h, &c, *channels );
+
+	if ( !data )
+	{
+		log_warning( "\"read_image\": Failed to open file: \"%s\"", filename );
+		return nullptr;
+	}
+
+	*width = static_cast<u32>( w );
+	*height = static_cast<u32>( h );
+
+	// stbi_load channel will always return as what it would have been if the final param was 0
+	// so only set the channel if it was 0, else it will actually be whatever was requested
+	if ( *channels == 0 )
+		*channels = static_cast<u32>( c );
+
+	return data;
+}
+
+static RESULT_CODE read_channel_image( ImageChannel *imgChannel, const char *path, u32 *w, u32 *h )
+{
+	imgChannel->image = read_image( path, &imgChannel->w, &imgChannel->h, &imgChannel->channels );
 
 	imgChannel->size = imgChannel->w * imgChannel->h * imgChannel->channels;
 
 	if ( !imgChannel->image )
 	{
-		show_log_warning( "Failed to open file: %s", path );
+		log_warning( "Failed to open file: %s", path );
 		return RESULT_CODE_FAILED_TO_OPEN_INPUT_FILE;
 	}
 	if ( imgChannel->size <= 0 )
 	{
-		show_log_warning( "Failed to open file: %s ( 0 bytes )", path );
+		log_warning( "Failed to open file: %s ( 0 bytes )", path );
 		return RESULT_CODE_FAILED_TO_OPEN_INPUT_FILE;
 	}
 	else if ( options.verbose )
 	{
-		show_log_message( "Read %d bytes for file: %s", imgChannel->size, path );
+		log( "Read %d bytes for file: %s", imgChannel->size, path );
 	}
 
 	if ( *w == 0 )
@@ -98,6 +354,15 @@ RESULT_CODE read_channel_image( ImageChannel *imgChannel, const char *path, u32 
 		*h = imgChannel->h;
 
 	return RESULT_CODE_SUCCESS;
+}
+
+static bool change_directory( const char *directory )
+{
+	#ifdef PLATFORM_WINDOWS
+		return _chdir( directory ) == 0;
+	#else
+		return chdir( directory ) == 0;
+	#endif
 }
 
 // -------------------------------------------------------------------------
@@ -119,8 +384,6 @@ int main( int argc, const char *argv[] )
 {
 #endif
 
-	platform_initialise();
-
 	options.inputFileR[ 0 ] = '\0';
 	options.inputFileG[ 0 ] = '\0';
 	options.inputFileB[ 0 ] = '\0';
@@ -137,9 +400,9 @@ int main( int argc, const char *argv[] )
 
 	commands.insert( "-ra", [] ( int &index, int argc, const char *argv[] )
 		{
-			show_log_message( "Arguments received [#%d]", argc );
+			log( "Arguments received [#%d]", argc );
 			for ( int i = 0; i < argc; ++i )
-				show_log_info( " [%d] = %s", i, argv[ i ] );
+				log( " [%d] = %s", i, argv[ i ] );
 
 			return RESULT_CODE_SUCCESS;
 		} );
@@ -155,7 +418,7 @@ int main( int argc, const char *argv[] )
 		{
 			options.redChannel = true;
 
-			string_utf8_copy( options.inputFileR, argv[ ++index ] );
+			string_copy( options.inputFileR, sizeof( options.inputFileR ), argv[ ++index ] );
 
 			return RESULT_CODE_SUCCESS;
 		} );
@@ -164,7 +427,7 @@ int main( int argc, const char *argv[] )
 		{
 			options.greenChannel = true;
 
-			string_utf8_copy( options.inputFileG, argv[ ++index ] );
+			string_copy( options.inputFileG, sizeof( options.inputFileG ), argv[ ++index ] );
 
 			return RESULT_CODE_SUCCESS;
 		} );
@@ -173,21 +436,21 @@ int main( int argc, const char *argv[] )
 		{
 			options.blueChannel = true;
 
-			string_utf8_copy( options.inputFileB, argv[ ++index ] );
+			string_copy( options.inputFileB, sizeof( options.inputFileB ), argv[ ++index ] );
 
 			return RESULT_CODE_SUCCESS;
 		} );
 
 	commands.insert( "-o", [] ( int &index, int argc, const char *argv[] )
 		{
-			string_utf8_copy( options.outputFile, argv[ ++index ] );
+			string_copy( options.outputFile, sizeof( options.outputFile ), argv[ ++index ] );
 
 			return RESULT_CODE_SUCCESS;
 		} );
 
 	commands.insert( "-memory", [] ( int &index, int argc, const char *argv[] )
 		{
-			options.memory = convert_to_int( argv[ ++index ] );
+			options.memory = atoi( argv[ ++index ] );
 
 			return RESULT_CODE_SUCCESS;
 		} );
@@ -205,24 +468,61 @@ int main( int argc, const char *argv[] )
 		}
 		else
 		{
-			show_log_warning( "Unknown command: %s", argv[ i ] );
+			log_warning( "Unknown command: %s", argv[ i ] );
 			return usage_message( RESULT_CODE_UNKNOWN_OPTIONAL_COMMAND );
 		}
 	}
 
-	if ( !memory_arena_initialise( &arena, 0, options.memory ) )
+	app.memory =
 	{
-		show_log_error( "Failed to initialise memory arena" );
+		.flags = 0,
+		.memory = nullptr,
+		.permanent =
+		{
+			.capacity = 0,
+			.available = 0,
+			.memory = nullptr,
+			.lastAlloc = nullptr,
+			.allocate_func = memory_bump_allocate,
+			.reallocate_func = memory_bump_reallocate,
+			.shrink_func = memory_bump_shrink,
+			.free_func = memory_bump_free,
+			.attach_func = memory_bump_attach,
+		},
+		.transient =
+		{
+			.capacity = 0,
+			.available = 0,
+			.memory = nullptr,
+			.lastAlloc = nullptr,
+			.allocate_func = memory_bump_allocate,
+			.reallocate_func = memory_bump_reallocate,
+			.shrink_func = memory_bump_shrink,
+			.free_func = memory_bump_free,
+			.attach_func = memory_bump_attach,
+		},
+		.fastBump =
+		{
+			.capacity = 0,
+			.available = 0,
+			.memory = nullptr,
+			.lastAlloc = nullptr,
+			.allocate_func = memory_fast_bump_allocate,
+			.attach_func = nullptr,
+		},
+	};
+
+	if ( !app.memory.init( 0, options.memory, 0, true ) )
+	{
+		log_error( "Failed to initialise memory app.memory" );
 		return usage_message( RESULT_CODE_FAILED_MEMORY_ARENA_INITIALISATION );
 	}
 
 	// Set working directory
 	if ( options.workingDirectory )
 	{
-		platform_set_current_directory( options.workingDirectory );
-
-		if ( options.verbose )
-			show_log_info( "Working directory changed to: %s", options.workingDirectory );
+		if ( change_directory( options.workingDirectory ) && options.verbose )
+			log( "Working directory changed to: %s", options.workingDirectory );
 	}
 
 	if ( !options.redChannel && !options.greenChannel && !options.blueChannel )
@@ -233,22 +533,22 @@ int main( int argc, const char *argv[] )
 	if ( options.verbose )
 	{
 		if ( options.redChannel )
-			show_log_info( "Channel Red Input file: %s", options.inputFileR );
+			log( "Channel Red Input file: %s", options.inputFileR );
 
 		if ( options.greenChannel )
-			show_log_info( "Channel Green Input file: %s", options.inputFileG );
+			log( "Channel Green Input file: %s", options.inputFileG );
 
 		if ( options.blueChannel )
-			show_log_info( "Channel Blue Input file: %s", options.inputFileB );
+			log( "Channel Blue Input file: %s", options.inputFileB );
 	}
 
 	// Create an output filename if one was not provided
 	if ( options.outputFile[ 0 ] == '\0' )
 	{
-		string_utf8_append( options.outputFile, "output.png" );
+		string_append( options.outputFile, sizeof( options.outputFile ), "output.png" );
 
 		if ( options.verbose )
-			show_log_info( "Output file automatically assigned filename: %s", options.outputFile );
+			log( "Output file automatically assigned filename: %s", options.outputFile );
 	}
 
 	// -----------------------------------------------------------------------------
@@ -297,11 +597,11 @@ int main( int argc, const char *argv[] )
 	u32 outHeight = h;
 	u32 outChannels = 4;
 	u64 outSize = w * h * outChannels;
-	u8 *outImage = memory_arena_transient_allocate( &arena, outSize, true );
+	u8 *outImage = app.memory.transient.allocate<u8>( outSize, true );
 
 	if ( !outImage )
 	{
-		show_log_warning( "Failed to allocate &d bytes.", outSize );
+		log_warning( "Failed to allocate &d bytes.", outSize );
 		return usage_message( RESULT_CODE_FAILED_TO_ALLOCATE_MEMORY_FOR_OUTPUT_IMAGE );
 	}
 
@@ -349,21 +649,17 @@ int main( int argc, const char *argv[] )
 	}
 
 	if ( options.verbose )
-		show_log_message( "Finished creating image. Preparing to save to disk." );
+		log( "Finished creating image. Preparing to save to disk." );
 
-	platform_create_directory( options.outputFile );
+	make_directory( options.outputFile );
 
 	if ( !stbi_write_png( options.outputFile, outWidth, outHeight, outChannels, outImage, outWidth * outChannels ) )
 	{
-		show_log_warning( "Failed to create output image: %s", options.outputFile );
+		log_warning( "Failed to create output image: %s", options.outputFile );
 		return usage_message( RESULT_CODE_FAILED_TO_CREATE_OUTPUT_FILE );
 	}
 	else if ( options.verbose )
-		show_log_message( "Successfully created output image[ %d x %d ]: %s", outWidth, outHeight, options.outputFile );
-
-#ifdef DEBUG
-	system( "pause");
-#endif
+		log( "Successfully created output image[ %d x %d ]: %s", outWidth, outHeight, options.outputFile );
 
 	return RESULT_CODE_SUCCESS;
 }

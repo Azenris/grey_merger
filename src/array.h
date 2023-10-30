@@ -9,13 +9,13 @@ struct Array
 
 	inline void add( Type &t )
 	{
-		massert( count < Capacity );
+		assert( count < Capacity );
 		data[ count++ ] = t;
 	}
 
 	inline void add( const Type &t )
 	{
-		massert( count < Capacity );
+		assert( count < Capacity );
 		data[ count++ ] = t;
 	}
 
@@ -34,14 +34,14 @@ struct Array
 	template <typename ...Args>
 	void add( const Type &t, Args&&... args )
 	{
-		massert( count + sizeof...( Args ) < Capacity );
+		assert( count + sizeof...( Args ) < Capacity );
 		data[ count++ ] = t;
 		add_no_bounds_check( args... );
 	}
 
 	inline void append( const Type *t, u64 appentCount )
 	{
-		massert( count + appentCount < Capacity );
+		assert( count + appentCount < Capacity );
 
 		Type *p = &data[ count ];
 
@@ -53,13 +53,13 @@ struct Array
 
 	inline void set( u64 idx, Type &t )
 	{
-		massert( idx < count );
+		assert( idx < count );
 		data[ idx ] = t;
 	}
 
 	inline void set( u64 idx, const Type &t )
 	{
-		massert( idx < count );
+		assert( idx < count );
 		data[ idx ] = t;
 	}
 
@@ -88,7 +88,7 @@ struct Array
 
 	inline void resize( u64 size )
 	{
-		massert( size <= Capacity );
+		assert( size <= Capacity );
 		count = size;
 	}
 
@@ -99,43 +99,43 @@ struct Array
 
 	inline void swap_and_remove( u64 idx )
 	{
-		massert( idx < count );
+		assert( idx < count );
 		data[ idx ] = data[ --count ];
 	}
 
 	[[nodiscard]] inline Type & operator[] ( u64 idx )
 	{
-		massert( idx < count );
+		assert( idx < count );
 		return data[ idx ];
 	}
 
 	[[nodiscard]] inline const Type & operator[] ( u64 idx ) const
 	{
-		massert( idx < count );
+		assert( idx < count );
 		return data[ idx ];
 	}
 
 	[[nodiscard]] inline Type &top()
 	{
-		massert( count > 0 );
+		assert( count > 0 );
 		return data[ count - 1 ];
 	}
 
 	inline Type &push()
 	{
-		massert( count < Capacity );
+		assert( count < Capacity );
 		return data[ count++ ];
 	}
 
 	inline Type &pop()
 	{
-		massert( count > 0 );
+		assert( count > 0 );
 		return data[ --count ];
 	}
 
 	inline void pop_back()
 	{
-		massert( count > 0 );
+		assert( count > 0 );
 		--count;
 	}
 

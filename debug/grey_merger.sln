@@ -23,14 +23,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		..\src\defines.h = ..\src\defines.h
 		..\src\error_codes.h = ..\src\error_codes.h
 		..\src\image.h = ..\src\image.h
-		..\src\logging.h = ..\src\logging.h
 		..\src\main.cpp = ..\src\main.cpp
 		..\src\map.h = ..\src\map.h
 		..\src\memory_arena.h = ..\src\memory_arena.h
-		..\src\platform.h = ..\src\platform.h
-		..\src\platform_windows.cpp = ..\src\platform_windows.cpp
-		..\src\strings.h = ..\src\strings.h
-		..\src\utility.h = ..\src\utility.h
 	EndProjectSection
 EndProject
 Global

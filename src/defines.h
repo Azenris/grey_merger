@@ -9,14 +9,6 @@
 
 #define array_length( arr ) 	( sizeof( arr ) / sizeof( arr[ 0 ] ) )
 
-#define MEMORY_ALIGNMENT		sizeof( u64 )
-
-#define INVALID_INDEX_UINT_16 	( UINT16_MAX )
-#define INVALID_INDEX_UINT_32 	( UINT32_MAX )
-#define INVALID_INDEX_UINT_64	( UINT64_MAX )
-
-#define MAX_OPEN_FILES 			( 8 )
-
 using i8  = int8_t;
 using i16 = int16_t;
 using i32 = int32_t;

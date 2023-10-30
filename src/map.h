@@ -1,6 +1,8 @@
 
 #pragma once
 
+#define INVALID_MAP_INDEX		( UINT64_MAX )
+
 // TRANSFORM ////////////////////////////////////////////////////////////////////
 template <typename T>
 struct MapTransformKey
@@ -110,7 +112,7 @@ struct MapHash<char *>
 	static u64 create( const char *key )
 	{
 		u64 hash = 5381;
-		int c = *key++;
+		i32 c = *key++;
 
 		while ( c )
 		{
@@ -129,7 +131,7 @@ struct MapHash<const char *>
 	static u64 create( const char *key )
 	{
 		u64 hash = 5381;
-		int c = *key++;
+		i32 c = *key++;
 
 		while ( c )
 		{
@@ -156,7 +158,14 @@ struct MapKeyCompare<char *>
 {
 	static bool compare( const char *lhs, const char *rhs )
 	{
-		return string_utf8_compare( lhs, rhs );
+		assert( lhs );
+		assert( rhs );
+
+		while ( *lhs != '\0' )
+			if ( *lhs++ != *rhs++ )
+				return false;
+
+		return *lhs == *rhs;
 	}
 };
 
@@ -165,7 +174,14 @@ struct MapKeyCompare<const char *>
 {
 	static bool compare( const char *lhs, const char *rhs )
 	{
-		return string_utf8_compare( lhs, rhs );
+		assert( lhs );
+		assert( rhs );
+
+		while ( *lhs != '\0' )
+			if ( *lhs++ != *rhs++ )
+				return false;
+
+		return *lhs == *rhs;
 	}
 };
 
@@ -185,7 +201,17 @@ struct MapKeyAssignment<const char *>
 	template <u64 Size>
 	static void assign( char( &lhs )[ Size ], const char *rhs )
 	{
-		string_utf8_copy( lhs, Size, rhs );
+		assert( Size >= 1 );
+		assert( rhs );
+
+		u64 size = Size;
+
+		while ( *rhs != '\0' && --size > 0 )
+		{
+			*lhs++ = *rhs++;
+		}
+
+		*lhs = '\0';
 	}
 
 	static void assign( const char *&lhs, const char *rhs )
@@ -207,6 +233,7 @@ struct Map
 	{
 		Key key;				// the key used in hash
 		Value value;			// the actual value
+		u64 bucket;				// bucket id
 		u64 prev;				// prev entry in values [same bucket]
 		u64 next;				// next entry in values [same bucket]
 		u64 idx;				// entry in values
@@ -221,11 +248,11 @@ struct Map
 
 		if ( hash >= entries.count )
 			for ( u64 i = entries.count; i <= hash; ++i )
-				entries.add( INVALID_INDEX_UINT_64 );
+				entries.add( INVALID_MAP_INDEX );
 
 		// Check if this key already exists
 		u64 prev = entries[ hash ];
-		while ( prev != INVALID_INDEX_UINT_64 )
+		while ( prev != INVALID_MAP_INDEX )
 		{
 			Entry *entry = &values[ prev ];
 			if ( KeyCompare::compare( entry->key, key ) )
@@ -241,15 +268,16 @@ struct Map
 		u64 next = entries[ hash ];
 
 		// Tell the previous root entry this one is now root
-		if ( next != INVALID_INDEX_UINT_64 )
+		if ( next != INVALID_MAP_INDEX )
 		{
-			massert( values[ next ].prev == INVALID_INDEX_UINT_64 );
+			assert( values[ next ].prev == INVALID_MAP_INDEX );
 			values[ next ].prev = idx;
 		}
 
 		// Setup the new entry
 		KeyAssign::assign( entry->key, key );
-		entry->prev = INVALID_INDEX_UINT_64;
+		entry->bucket = hash;
+		entry->prev = INVALID_MAP_INDEX;
 		entry->next = next;
 		entry->idx = idx;
 
@@ -257,6 +285,23 @@ struct Map
 		entries[ hash ] = idx;
 
 		return entry;
+	}
+
+	Value *push_get( const KeyType &key )
+	{
+		Entry *entry = push( key );
+		if ( !entry )
+			return nullptr;
+		return &entry->value;
+	}
+
+	Value *insert_get( const KeyType &key, const Value &value )
+	{
+		Entry *entry = push( key );
+		if ( !entry )
+			return nullptr;
+		entry->value = value;
+		return &entry->value;
 	}
 
 	bool insert( const KeyType &key, const Value &value )
@@ -277,7 +322,7 @@ struct Map
 		// use .data[ x ] to avoid validation of index (will be out of bounds)
 		bool inserted = insert( newKey, values.data[ values.count ].value );
 
-		massert( inserted );
+		assert( inserted );
 
 		return inserted;
 	}
@@ -291,7 +336,7 @@ struct Map
 
 		u64 idx = entries[ hash ];
 
-		while ( idx != INVALID_INDEX_UINT_64 )
+		while ( idx != INVALID_MAP_INDEX )
 		{
 			Entry *entry = &values[ idx ];
 
@@ -299,13 +344,13 @@ struct Map
 			{
 				// First inform data about the value being removed
 				// Inform the previous entry (if there is one) it no longer exists. Or make next the root entry
-				if ( entry->prev != INVALID_INDEX_UINT_64 )
+				if ( entry->prev != INVALID_MAP_INDEX )
 					values[ entry->prev ].next = entry->next;
 				else
 					entries[ hash ] = entry->next;
 
 				// Inform the next entry (if there is one) it no longer exists
-				if ( entry->next != INVALID_INDEX_UINT_64 )
+				if ( entry->next != INVALID_MAP_INDEX )
 					values[ entry->next ].prev = entry->prev;
 
 				Entry *other = &values.top();
@@ -315,13 +360,13 @@ struct Map
 				{
 					// Now inform data about the value that will get swapped to fill that removed gap
 					// Update the previous' next
-					if ( other->prev != INVALID_INDEX_UINT_64 )
+					if ( other->prev != INVALID_MAP_INDEX )
 						values[ other->prev ].next = idx;
 					else
-						entries[ KeyHash::create( other->key ) % Buckets ] = idx;
+						entries[ other->bucket ] = idx;
 
 					// Inform the next' prev
-					if ( other->next != INVALID_INDEX_UINT_64 )
+					if ( other->next != INVALID_MAP_INDEX )
 						values[ other->next ].prev = idx;
 
 					// Update its own Idx
@@ -340,10 +385,70 @@ struct Map
 		return false;
 	}
 
+	bool remove_keep_order( const KeyType &key )
+	{
+		u64 hash = KeyHash::create( key ) % Buckets;
+
+		if ( hash >= entries.count )
+			return false;
+
+		u64 idx = entries[ hash ];
+
+		while ( idx != INVALID_MAP_INDEX )
+		{
+			Entry *entry = &values[ idx ];
+
+			if ( KeyCompare::compare( entry->key, key ) )
+			{
+				// First inform data about the value being removed
+				// Inform the previous entry (if there is one) it no longer exists. Or make next the root entry
+				if ( entry->prev != INVALID_MAP_INDEX )
+					values[ entry->prev ].next = entry->next;
+				else
+					entries[ hash ] = entry->next;
+
+				// Inform the next entry (if there is one) it no longer exists
+				if ( entry->next != INVALID_MAP_INDEX )
+					values[ entry->next ].prev = entry->prev;
+
+				// Loop through all values after the one being removed and shuffle them down 1
+				// Also update their prev->next and next->prev down 1 too
+				for ( u64 i = idx + 1; idx < values.count; ++i )
+				{
+					Entry *e = &values[ i ];
+					// If its prev is INVALID_MAP_INDEX, then its a root entry
+					if ( e->prev != INVALID_MAP_INDEX )
+						values[ e->prev ].next -= 1;
+					else
+						entries[ e->bucket ] -= 1;
+					if ( e->next != INVALID_MAP_INDEX )
+						values[ e->next ].prev -= 1;
+					e->idx -= 1;
+					values[ i - 1 ] = *e;
+				}
+
+				// Everythign is shuffled down, there is now 1 less entry
+				values.count -= 1;
+
+				return true;
+			}
+
+			idx = entry->next;
+		}
+
+		return false;
+	}
+
 	inline void clear()
 	{
 		values.clear();
 		entries.clear();
+	}
+
+	[[nodiscard]] Value *get_value( const KeyType &key )
+	{
+		Entry *entry = find( key );
+		return entry ? &entry->value : nullptr;
 	}
 
 	[[nodiscard]] Entry *find( const KeyType &key )
@@ -355,7 +460,7 @@ struct Map
 
 		u64 idx = entries[ hash ];
 
-		while ( idx != INVALID_INDEX_UINT_64 )
+		while ( idx != INVALID_MAP_INDEX )
 		{
 			Entry *entry = &values[ idx ];
 			if ( KeyCompare::compare( entry->key, key ) )
