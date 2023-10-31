@@ -6,6 +6,9 @@ if NOT defined VSCMD_ARG_TGT_ARCH (
 	call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 )
 
+:: MUST be after the enviroment setup
+SETLOCAL EnableDelayedExpansion
+
 :: -O2					= Creates fast code.
 :: -Ot					= Favors fast code.
 :: -GF					= Enables string pooling.
