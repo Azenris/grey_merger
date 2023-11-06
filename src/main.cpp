@@ -1,15 +1,20 @@
 
 // System Includes
-#include <stdio.h>
+#include <stdint.h>
 #include <stdarg.h>
-#include <assert.h>
+#include <string.h>
 #include <cmath>
+#include <cfloat>
+#include <cstdio>
+#include <assert.h>
 
 // Platform Specific Includes
 #ifdef PLATFORM_WINDOWS
-#include <direct.h>
+	#include <direct.h>
+	#include "dirent/dirent.h"
 #else
-#include <sys/stat.h>
+	#include <sys/stat.h>
+	#include <dirent.h>
 #endif
 
 // Third Party Includes
@@ -22,14 +27,13 @@
 #include "map.h"
 #include "memory_arena.h"
 #include "error_codes.h"
+#include "image.h"
 
 struct App
 {
 	MemoryArena memory;
 
 } app;
-
-#include "image.h"
 
 struct ImageChannel
 {
@@ -368,22 +372,8 @@ static bool change_directory( const char *directory )
 // -------------------------------------------------------------------------
 // ENTRY
 // -------------------------------------------------------------------------
-#ifdef DEBUG
-int main( int _argc, const char *_argv[] )
-{
-	const char *argv[] = { "grey_merger.exe",
-		"-channel-r", "debug\\test\\image_0.png",
-		"-channel-g", "debug\\test\\image_1.png",
-		"-channel-b", "debug\\test\\image_2.png",
-		"-v", "-ra"
-		, "-wd", "C:\\ProgrammingCDrive\\grey_merger"
-		, "-o", "debug\\test\\output.png" };
-	int argc = array_length( argv );
-#else
 int main( int argc, const char *argv[] )
 {
-#endif
-
 	options.inputFileR[ 0 ] = '\0';
 	options.inputFileG[ 0 ] = '\0';
 	options.inputFileB[ 0 ] = '\0';
@@ -663,3 +653,12 @@ int main( int argc, const char *argv[] )
 
 	return RESULT_CODE_SUCCESS;
 }
+
+// -------------------------------------------------------------------------
+// Unity Build
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
