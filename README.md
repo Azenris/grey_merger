@@ -1,5 +1,5 @@
 # What does it do?
-Merge 3 PNG grey images each using a different RGB Channels
+Merge 3 PNG grey images each using a different RGB Channels.
 
 # What is this for?
 I use it for `personal` projects.
