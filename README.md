@@ -11,7 +11,5 @@ cmake --build build --config=Release         for release
 cmake --build build --config=Debug           for debug
 ```
 ```
-You can check the cbuild.bat as an example.
+You can check the build.bat as an example.
 ```
-
-If you don't want to get cmake, and you are on windows, you can use `build.bat`
