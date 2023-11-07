@@ -11,10 +11,10 @@ add_executable( grey_merger src/main.cpp )
 
 target_include_directories( grey_merger PRIVATE "./third_party/" )
 
-add_compile_definitions( grey_merger PRIVATE C_PLUS_PLUS )
-add_compile_definitions( grey_merger PRIVATE _CRT_SECURE_NO_WARNINGS )
-add_compile_definitions( grey_merger PRIVATE "$<$<CONFIG:Debug>:DEBUG>" )
-add_compile_definitions( grey_merger PRIVATE "$<$<CONFIG:Release>:NDEBUG>" )
+target_compile_definitions( grey_merger PRIVATE C_PLUS_PLUS )
+target_compile_definitions( grey_merger PRIVATE _CRT_SECURE_NO_WARNINGS )
+target_compile_definitions( grey_merger PRIVATE "$<$<CONFIG:Debug>:DEBUG>" )
+target_compile_definitions( grey_merger PRIVATE "$<$<CONFIG:Release>:NDEBUG>" )
 
 target_compile_features( grey_merger PRIVATE cxx_std_20 )
 
