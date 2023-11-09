@@ -17,7 +17,7 @@ set_target_properties(
 	RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/builds/release"
 )
 
-target_include_directories( grey_merger PRIVATE "./third_party/" )
+target_include_directories( grey_merger PRIVATE "third_party/" )
 
 target_compile_definitions( grey_merger PRIVATE C_PLUS_PLUS )
 target_compile_definitions( grey_merger PRIVATE "$<$<CONFIG:Debug>:DEBUG>" )
