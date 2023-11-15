@@ -24,7 +24,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build Project
         run: cmake --build build --config Release
-      - name: Upload Atifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: release-ubuntu
@@ -39,7 +39,7 @@ jobs:
         run: cmake -S . -B build -G"Visual Studio 17 2022" -DCMAKE_BUILD_TYPE=Release
       - name: Build Project
         run: cmake --build build --config Release
-      - name: Upload Atifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: release-windows
