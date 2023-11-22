@@ -1,3 +1,7 @@
+# Status
+![Build Windows](https://github.com/Azenris/grey_merger/actions/workflows/build-windows.yml/badge.svg)
+![Build Ubuntu](https://github.com/Azenris/grey_merger/actions/workflows/build-ubuntu.yml/badge.svg)
+
 # What does it do?
 Merge 3 PNG grey images each using a different RGB Channels.
 
