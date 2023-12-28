@@ -34,9 +34,9 @@ if ( MSVC )
 	target_compile_options( grey_merger PRIVATE $<$<CONFIG:Release>:-O2 -Ot -GF> )
 
 	if ( BUILD_CRT_STATIC )
-		target_compile_options( td PRIVATE $<$<CONFIG:Release>:-MT>$<$<CONFIG:Debug>:-MTd> )
+		target_compile_options( grey_merger PRIVATE $<$<CONFIG:Release>:-MT>$<$<CONFIG:Debug>:-MTd> )
 	else()
-		target_compile_options( td PRIVATE $<$<CONFIG:Release>:-MD>$<$<CONFIG:Debug>:-MDd> )
+		target_compile_options( grey_merger PRIVATE $<$<CONFIG:Release>:-MD>$<$<CONFIG:Debug>:-MDd> )
 	endif()
 endif()
 
